@@ -14,25 +14,24 @@ LOG_MODULE_REGISTER(weight, CONFIG_LOG_DEFAULT_LEVEL);
 
 void weight_thread_entry(void *p1, void *p2, void *p3)
 {
-    int32_t current_weight;
+    int weight_cg = 0;
     
     // 1. Initial setup and calibration (Tare here or during startup)
-    current_weight = 0;
     
     while (1) {
         // 2. Read the Sensor
         // Replace this with your actual HX711 driver API calls
-        current_weight = current_weight + 21300; // Dummy increment for illustration
-        if (current_weight > 500000) {
-            current_weight = 8600; // Reset for demo purposes
+        weight_cg = weight_cg + 2130; // Dummy increment for illustration
+        if (weight_cg > 50000) {
+            weight_cg = 860; // Reset for demo purposes
         }
         
         // 3. Create the ZBUS message
         struct weight_msg msg = {
-            .weight_mg = current_weight
+            .weight_cg = weight_cg
         };
 
-        LOG_INF("Publishing weight: %d mg", msg.weight_mg);
+        LOG_INF("Publishing weight: %d cg", msg.weight_cg);
 
         // 4. Publish the Weight
         // Publish reliably to the channel. 

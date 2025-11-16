@@ -6,7 +6,7 @@
 
 // Message Struct Definitions (What data is transferred)
 struct weight_msg {
-    int32_t weight_mg;
+    int weight_cg;
 };
 
 struct button_msg {

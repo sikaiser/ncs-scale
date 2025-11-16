@@ -9,6 +9,7 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 int main(void)
 {
         zbus_print_channels_and_observers();
+        bt_init();
 
         while (1) {
                 LOG_INF("Main thread heartbeat");
