@@ -6,11 +6,14 @@ find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 
 project(ncs-scale)
 
-target_include_directories(app PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
 target_sources(app PRIVATE
     src/main.c
     src/channels.c
     src/weight.c
     src/bluetooth.c
     src/display.c
+)
+
+target_include_directories(app PRIVATE
+    include
 )
