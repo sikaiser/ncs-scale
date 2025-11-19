@@ -10,7 +10,6 @@ ZBUS_SUBSCRIBER_DEFINE(bluetooth_sub, 4);
 #include <zephyr/logging/log.h>
 
 #define LOG_MODULE_NAME bluetooth
-#include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* BLUETOOTH */
@@ -114,7 +113,7 @@ static void subscriber_task(void)
 
 			int weight_cg = weight_data.weight_cg;
 
-			LOG_INF("From subscriber -> Weight=%d cg", weight_cg);
+			LOG_INF("From bluetooth subscriber -> Weight=%d cg", weight_cg);
 
 			// Bthome protocol doesn't support negative values for mass.
 			// If interactive taring is introduced in the future, it might make sense to switch to a data type that supports negative values.
@@ -133,4 +132,4 @@ static void subscriber_task(void)
 	}
 }
 
-K_THREAD_DEFINE(subscriber_task_id, CONFIG_MAIN_STACK_SIZE, subscriber_task, NULL, NULL, NULL, 5, 0, 0);
+K_THREAD_DEFINE(subscriber_bt_id, CONFIG_MAIN_STACK_SIZE, subscriber_task, NULL, NULL, NULL, 5, 0, 0);
