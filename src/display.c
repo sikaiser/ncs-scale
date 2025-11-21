@@ -163,7 +163,7 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			LOG_INF("From display subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
+			//LOG_INF("From display subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
 
 			bool bt_conn = true;
 			bool wifi_conn = false;

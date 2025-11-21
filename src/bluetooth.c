@@ -111,7 +111,7 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			LOG_INF("From bluetooth subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
+			//LOG_INF("From bluetooth subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
 
 			// Bthome protocol doesn't support negative values for mass.
 			// If interactive taring is introduced in the future, it might make sense to switch to a data type that supports negative values.

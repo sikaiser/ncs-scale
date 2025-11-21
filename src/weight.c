@@ -49,7 +49,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
             .weight_g = weight
         };
 
-        LOG_INF("Publishing weight: %d.%06d grams", weight.val1, weight.val2);
+        //LOG_INF("Publishing weight: %d.%06d grams", weight.val1, weight.val2);
 
         // 4. Publish the Weight
         // Publish reliably to the channel. 
