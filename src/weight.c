@@ -18,7 +18,7 @@ LOG_MODULE_REGISTER(weight, CONFIG_LOG_DEFAULT_LEVEL);
 
 // Define the thread stack and object
 #define WEIGHT_THREAD_STACK_SIZE 1024
-#define WEIGHT_THREAD_SLEEP_MS 1000 
+#define WEIGHT_THREAD_SLEEP_MS 100 
 
 
 // SCALE
