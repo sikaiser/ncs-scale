@@ -31,6 +31,24 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	__ASSERT(hx711_dev == NULL, "Failed to get device binding");
 
 	LOG_INF("Device is %p, name is %s", hx711_dev, hx711_dev->name);
+
+    // Let the HX711 settle? Seems to be necessary for successful tare
+	//k_msleep(1000);
+
+	// Tare
+	int offset;
+	offset = avia_hx711_tare(hx711_dev, 10);
+        
+	LOG_INF("Tare offset: %d\n", offset);
+
+	// Calibrate and identify slope using known weight
+	//calibrateWKnownWeight(337); // 337g = 0.000920
+
+    // Set slope using known value (from above calibration)
+	const struct sensor_value slope = { .val1 = 0, .val2 = 920 };
+	struct hx711_data *data = hx711_dev->data;
+	data->slope.val1 = slope.val1;
+	data->slope.val2 = slope.val2;
     
     while (1) {
         // 2. Read the Sensor
@@ -69,3 +87,20 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 K_THREAD_DEFINE(weight_thread, WEIGHT_THREAD_STACK_SIZE,
                 weight_thread_entry, NULL, NULL, NULL,
                 3, 0, 0);
+
+
+void calibrateWKnownWeight(int calibration_weight) {
+	printk("Calibrating...\n");
+	printk("Place known weight of %d on scale...\n",
+		calibration_weight);
+
+	for (int i = 5; i >= 0; i--) {
+		printk(" %d..", i);
+		k_msleep(1000);
+	}
+
+	printk("\nNow assuming that the weight was placed and calculating slope...\n");
+	struct sensor_value slope;
+	slope = avia_hx711_calibrate(hx711_dev, calibration_weight, 5);
+	printk("Slope set to : %d.%06d\n", slope.val1, slope.val2);
+}
