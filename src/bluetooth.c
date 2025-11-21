@@ -116,14 +116,9 @@ static void subscriber_task(void)
 			// Bthome protocol doesn't support negative values for mass.
 			// If interactive taring is introduced in the future, it might make sense to switch to a data type that supports negative values.
 
-			// Convert to decigrams for BTHome
-			// 1. Convert val1 (grams) to tenths of a gram: val1 * 10
-			int32_t scaled_val1 = msg.weight_g.val1 * 10;
-
-			// 2. Convert val2 (micro-units, 10^-6 g) to tenths of a gram (10^-1 g):
-			//    (10^-6) / (10^-1) = 10^-5. Divide val2 by 100,000.
-			//    (This captures the first decimal place, val2 / 100000)
-			int32_t scaled_val2 = msg.weight_g.val2 / 100000;
+			// Convert for BTHome
+			int32_t scaled_val1 = msg.weight_g.val1 * 100;
+			int32_t scaled_val2 = msg.weight_g.val2 / 10000;
 
 			// 3. Combine to get the final scaled 16-bit integer
 			int16_t decigrams = (int16_t)(scaled_val1 + scaled_val2);
