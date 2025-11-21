@@ -16,7 +16,7 @@ int main(void)
 
         while (1) {
                 LOG_INF("Main thread heartbeat");
-                k_msleep(2000); 
+                k_msleep(10000); 
         }
 
 	return 0;
