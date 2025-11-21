@@ -12,7 +12,7 @@ ZBUS_CHAN_DEFINE(weight_channel,      /* Name */
 		 NULL,                        /* Validator */
 		 NULL,                        /* User data */
 		 ZBUS_OBSERVERS_EMPTY,        /* Observers */
-		 ZBUS_MSG_INIT(.weight_cg = 0) /* Initial value */
+		 ZBUS_MSG_INIT(.weight_g = {.val1 = 0, .val2 = 0}) /* Initial value */
 );
 
 ZBUS_CHAN_DEFINE(button_channel,              /* Name */

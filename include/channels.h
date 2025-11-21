@@ -3,10 +3,12 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/zbus/zbus.h>
+#include <zephyr/drivers/sensor.h>
+
 
 // Message Struct Definitions (What data is transferred)
 struct weight_msg {
-    int weight_cg;
+    struct sensor_value weight_g;
 };
 
 struct button_msg {

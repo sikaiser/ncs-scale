@@ -107,20 +107,30 @@ static void subscriber_task(void)
 	while (!zbus_sub_wait(&bluetooth_sub, &chan, K_FOREVER)) {
 
 		if (&weight_channel == chan) {
-			struct weight_msg weight_data;
+			struct weight_msg msg;
 
-			zbus_chan_read(&weight_channel, &weight_data, K_MSEC(500));
+			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			int weight_cg = weight_data.weight_cg;
-
-			LOG_INF("From bluetooth subscriber -> Weight=%d cg", weight_cg);
+			LOG_INF("From bluetooth subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
 
 			// Bthome protocol doesn't support negative values for mass.
 			// If interactive taring is introduced in the future, it might make sense to switch to a data type that supports negative values.
 
+			// Convert to decigrams for BTHome
+			// 1. Convert val1 (grams) to tenths of a gram: val1 * 10
+			int32_t scaled_val1 = msg.weight_g.val1 * 10;
+
+			// 2. Convert val2 (micro-units, 10^-6 g) to tenths of a gram (10^-1 g):
+			//    (10^-6) / (10^-1) = 10^-5. Divide val2 by 100,000.
+			//    (This captures the first decimal place, val2 / 100000)
+			int32_t scaled_val2 = msg.weight_g.val2 / 100000;
+
+			// 3. Combine to get the final scaled 16-bit integer
+			int16_t decigrams = (int16_t)(scaled_val1 + scaled_val2);
+
 			// Split into high and low bytes
-			service_data[IDX_MASS_HIGH] = (weight_cg >> 8) & 0xFF; // High byte
-			service_data[IDX_MASS_LOW] = weight_cg & 0xFF;         // Low byte
+			service_data[IDX_MASS_HIGH] = (decigrams >> 8) & 0xFF; // High byte
+			service_data[IDX_MASS_LOW] = decigrams & 0xFF;         // Low byte
 			service_data[IDX_BATTERY] = (uint8_t)67;
 			for (int i = 0; i < 1; i++) {
 				int err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
