@@ -33,7 +33,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	LOG_INF("Device is %p, name is %s", hx711_dev, hx711_dev->name);
 
     // Let the HX711 settle? Seems to be necessary for successful tare
-	//k_msleep(1000);
+	k_msleep(100);
 
 	// Tare
 	int offset;
