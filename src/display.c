@@ -96,7 +96,7 @@ void display_weight(const struct device *display, struct sensor_value weight,
     cfb_framebuffer_clear(display, false);
     
     // Display weight in large text (center of screen)
-    snprintf(weight_str, sizeof(weight_str), "%d.%06d", weight.val1, weight.val2);
+    snprintf(weight_str, sizeof(weight_str), "%3d.%1d", weight.val1, abs(weight.val2 / 100000));
     cfb_print(display, weight_str, 0, 0);
     
     // Draw status icons at top right
