@@ -10,6 +10,7 @@ LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
 int main(void)
 {
+        // weight thread starts itself
         zbus_print_channels_and_observers();
         bt_init();
         display_init();
