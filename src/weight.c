@@ -3,6 +3,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/zbus/zbus.h>
 
+ZBUS_SUBSCRIBER_DEFINE(weight_cmd_sub, 4);
+
 #define LOG_MODULE_NAME weight
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(weight, CONFIG_LOG_DEFAULT_LEVEL);
@@ -41,6 +43,8 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
         
 	LOG_INF("Tare offset: %d\n", offset);
 
+    zbus_chan_add_obs(&button_channel, &weight_cmd_sub, K_NO_WAIT);
+
 	// Calibrate and identify slope using known weight
 	//calibrateWKnownWeight(337); // 337g = 0.000920
 
@@ -51,6 +55,19 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	data->slope.val2 = slope.val2;
     
     while (1) {
+        const struct zbus_channel *chan;
+
+        while (!zbus_sub_wait(&weight_cmd_sub, &chan, K_NO_WAIT)) {
+            if (&button_channel == chan) {
+                struct button_msg btn_msg;
+                int rc = zbus_chan_read(&button_channel, &btn_msg, K_NO_WAIT);
+                if (rc == 0 && btn_msg.tare_request) {
+                    int tare_rc = avia_hx711_tare(hx711_dev, 10);
+                    LOG_INF("Tare requested over BLE, new offset: %d", tare_rc);
+                }
+            }
+        }
+
         // 2. Read the Sensor
         static struct sensor_value weight;
         int ret;

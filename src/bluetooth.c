@@ -21,6 +21,7 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 
 #define WSS_SERVICE_UUID        0x181D
 #define WEIGHT_CHAR_UUID        0x2A9D
+#define CMD_UUID                BT_UUID_128_ENCODE(0x553f4e49, 0xbf21, 0x4468, 0x9c6c, 0x0e4fb5b17697)
 
 #define ADV_PARAM BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_IDENTITY, \
 				  BT_GAP_ADV_FAST_INT_MIN_2, \
@@ -28,6 +29,7 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 
 static struct bt_uuid_16 wss_service_uuid = BT_UUID_INIT_16(WSS_SERVICE_UUID);
 static struct bt_uuid_16 weight_char_uuid = BT_UUID_INIT_16(WEIGHT_CHAR_UUID);
+static struct bt_uuid_128 cmd_char_uuid = BT_UUID_INIT_128(CMD_UUID);
 static bool notify_enabled;
 static int16_t weight_deci_g;
 
@@ -37,13 +39,55 @@ static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 	LOG_INF("Weight notifications %s", notify_enabled ? "enabled" : "disabled");
 }
 
+static ssize_t cmd_write_cb(struct bt_conn *conn,
+				   const struct bt_gatt_attr *attr,
+				   const void *buf,
+				   uint16_t len,
+				   uint16_t offset,
+				   uint8_t flags)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(attr);
+	ARG_UNUSED(offset);
+	ARG_UNUSED(flags);
+
+	if (len == 0U) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+	}
+
+	const uint8_t *cmd = buf;
+
+	/* Timemore plugin tare payload is a single byte 0x00 on the command characteristic. */
+	if (cmd[0] == 0x00 || cmd[0] == 't' || cmd[0] == 'T' || cmd[0] == 0x01) {
+		struct button_msg msg = {
+			.tare_request = true,
+		};
+
+		int err = zbus_chan_pub(&button_channel, &msg, K_NO_WAIT);
+		if (err) {
+			LOG_ERR("Failed to publish tare request (err %d)", err);
+			return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
+		}
+
+		LOG_INF("Received tare command");
+	} else {
+		LOG_WRN("Unsupported command byte 0x%02x", cmd[0]);
+	}
+
+	return len;
+}
+
 BT_GATT_SERVICE_DEFINE(weight_svc,
 	BT_GATT_PRIMARY_SERVICE(&wss_service_uuid),
 	BT_GATT_CHARACTERISTIC(&weight_char_uuid.uuid,
 		BT_GATT_CHRC_NOTIFY,
 		BT_GATT_PERM_NONE,
 		NULL, NULL, &weight_deci_g),
-	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
+	BT_GATT_CHARACTERISTIC(&cmd_char_uuid.uuid,
+		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+		BT_GATT_PERM_WRITE,
+		NULL, cmd_write_cb, NULL)
 );
 
 static struct bt_data ad[] = {
