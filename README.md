@@ -150,7 +150,7 @@ For a headless profile, leave shield unset and keep display options disabled.
 
 - Sensor path assumes a single HX711 instance (`DEVICE_DT_GET_ANY`).
 - BLE format is currently fixed to BTHome service data encoding.
-- Display initialization is currently part of default startup path.
+- Display support is optional and only enabled in display builds.
 
 These are good next abstraction points if you plan to create product variants (headless mode, dual-scale inputs, or alternate BLE payloads).
 
