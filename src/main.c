@@ -10,6 +10,8 @@
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
 
+static void log_uptime(void);
+
 int main(void)
 {
         // weight thread starts itself
@@ -27,7 +29,8 @@ int main(void)
 	return 0;
 }
 
-void log_uptime(void) {
+static void log_uptime(void)
+{
         int64_t uptime_ms = k_uptime_get();
 
         // Convert milliseconds to seconds, minutes, and hours
