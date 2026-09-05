@@ -14,34 +14,42 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 
 /* BLUETOOTH */
 #include <zephyr/bluetooth/bluetooth.h>
+#include <zephyr/bluetooth/conn.h>
+#include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
 
-#define SERVICE_DATA_LEN        8           /* Length of service data for BTHome service */
-#define SERVICE_UUID            0xfcd2      /* BTHome service UUID */
-#define IDX_MASS_LOW            4           
-#define IDX_MASS_HIGH           5           
-#define IDX_BATTERY             7           
+#define WSS_SERVICE_UUID        0x181D
+#define WEIGHT_CHAR_UUID        0x2A9D
 
-#define ADV_PARAM BT_LE_ADV_PARAM(BT_LE_ADV_OPT_USE_IDENTITY, \
+#define ADV_PARAM BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_IDENTITY, \
 				  BT_GAP_ADV_FAST_INT_MIN_2, \
 				  BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
+static struct bt_uuid_16 wss_service_uuid = BT_UUID_INIT_16(WSS_SERVICE_UUID);
+static struct bt_uuid_16 weight_char_uuid = BT_UUID_INIT_16(WEIGHT_CHAR_UUID);
+static bool notify_enabled;
+static int16_t weight_deci_g;
 
-static uint8_t service_data[SERVICE_DATA_LEN] = {
-	BT_UUID_16_ENCODE(SERVICE_UUID),
-	0x40,
-	0x06,	/* Object ID Mass (kg) */
-	0x00,	/* Low byte */
-	0x00,   /* High byte */
-	0x01,   /* Object ID Battery level */
-	0x00,   /* Single byte */
-};
+static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
+{
+	notify_enabled = (value == BT_GATT_CCC_NOTIFY);
+	LOG_INF("Weight notifications %s", notify_enabled ? "enabled" : "disabled");
+}
+
+BT_GATT_SERVICE_DEFINE(weight_svc,
+	BT_GATT_PRIMARY_SERVICE(&wss_service_uuid),
+	BT_GATT_CHARACTERISTIC(&weight_char_uuid.uuid,
+		BT_GATT_CHRC_NOTIFY,
+		BT_GATT_PERM_NONE,
+		NULL, NULL, &weight_deci_g),
+	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE)
+);
 
 static struct bt_data ad[] = {
-	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR), // Flags
-	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1), // Device Name
-	BT_DATA(BT_DATA_SVC_DATA16, service_data, ARRAY_SIZE(service_data)) // BTHome Data
+	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
+	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
+	BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(WSS_SERVICE_UUID))
 };
 
 static void bt_ready(int err)
@@ -113,24 +121,17 @@ static void subscriber_task(void)
 
 			//LOG_INF("From bluetooth subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
 
-			// Bthome protocol doesn't support negative values for mass.
-			// If interactive taring is introduced in the future, it might make sense to switch to a data type that supports negative values.
+			/* Convert grams (sensor_value) to deci-grams for a compact 16-bit payload. */
+			int32_t scaled_val1 = msg.weight_g.val1 * 10;
+			int32_t scaled_val2 = msg.weight_g.val2 / 100000;
 
-			// Convert for BTHome
-			int32_t scaled_val1 = msg.weight_g.val1 * 100;
-			int32_t scaled_val2 = msg.weight_g.val2 / 10000;
+			weight_deci_g = (int16_t)(scaled_val1 + scaled_val2);
 
-			// 3. Combine to get the final scaled 16-bit integer
-			int16_t decigrams = (int16_t)(scaled_val1 + scaled_val2);
-
-			// Split into high and low bytes
-			service_data[IDX_MASS_HIGH] = (decigrams >> 8) & 0xFF; // High byte
-			service_data[IDX_MASS_LOW] = decigrams & 0xFF;         // Low byte
-			service_data[IDX_BATTERY] = (uint8_t)67;
-			for (int i = 0; i < 1; i++) {
-				int err = bt_le_adv_update_data(ad, ARRAY_SIZE(ad), NULL, 0);
+			if (notify_enabled) {
+				int err = bt_gatt_notify(NULL, &weight_svc.attrs[2], &weight_deci_g,
+							 sizeof(weight_deci_g));
 				if (err) {
-					LOG_ERR("Failed to update advertising data (err %d)\n", err);
+					LOG_ERR("Failed to notify weight (err %d)", err);
 				}
 			}
 		}
