@@ -30,13 +30,67 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 static struct bt_uuid_16 wss_service_uuid = BT_UUID_INIT_16(WSS_SERVICE_UUID);
 static struct bt_uuid_16 weight_char_uuid = BT_UUID_INIT_16(WEIGHT_CHAR_UUID);
 static struct bt_uuid_128 cmd_char_uuid = BT_UUID_INIT_128(CMD_UUID);
-static bool notify_enabled;
-static int16_t weight_deci_g;
+static bool stream_enabled;
+static bool use_indications;
+static bool indicate_in_flight;
+static uint8_t weight_frame[9] = {
+	0x10,
+	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+};
+
+static void indicate_cb(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(params);
+
+	indicate_in_flight = false;
+
+	if (err) {
+		LOG_WRN("Weight indication completed with ATT err 0x%02x", err);
+	}
+}
+
+static struct bt_gatt_indicate_params indicate_params;
 
 static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
-	notify_enabled = (value == BT_GATT_CCC_NOTIFY);
-	LOG_INF("Weight notifications %s", notify_enabled ? "enabled" : "disabled");
+	ARG_UNUSED(attr);
+
+	stream_enabled = (value == BT_GATT_CCC_NOTIFY || value == BT_GATT_CCC_INDICATE);
+	use_indications = (value == BT_GATT_CCC_INDICATE);
+
+	LOG_INF("Weight stream %s (%s)",
+		stream_enabled ? "enabled" : "disabled",
+		use_indications ? "indicate" : "notify");
+}
+
+static ssize_t weight_write_cb(struct bt_conn *conn,
+				      const struct bt_gatt_attr *attr,
+				      const void *buf,
+				      uint16_t len,
+				      uint16_t offset,
+				      uint8_t flags)
+{
+	ARG_UNUSED(conn);
+	ARG_UNUSED(attr);
+	ARG_UNUSED(offset);
+	ARG_UNUSED(flags);
+
+	if (len == 0U) {
+		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
+	}
+
+	const uint8_t *cmd = buf;
+
+	/* Timemore client writes [0x02,0x00] to start data flow and [0x00] as heartbeat. */
+	if ((len == 2U && cmd[0] == 0x02U && cmd[1] == 0x00U) ||
+	    (len == 1U && cmd[0] == 0x00U)) {
+		return len;
+	}
+
+	LOG_WRN("Unexpected 2A9D write (len %u, first 0x%02x)", len, cmd[0]);
+	return len;
 }
 
 static ssize_t cmd_write_cb(struct bt_conn *conn,
@@ -58,7 +112,7 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 	const uint8_t *cmd = buf;
 
 	/* Timemore plugin tare payload is a single byte 0x00 on the command characteristic. */
-	if (cmd[0] == 0x00 || cmd[0] == 't' || cmd[0] == 'T' || cmd[0] == 0x01) {
+	if (len == 1U && cmd[0] == 0x00U) {
 		struct button_msg msg = {
 			.tare_request = true,
 		};
@@ -80,9 +134,10 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 BT_GATT_SERVICE_DEFINE(weight_svc,
 	BT_GATT_PRIMARY_SERVICE(&wss_service_uuid),
 	BT_GATT_CHARACTERISTIC(&weight_char_uuid.uuid,
-		BT_GATT_CHRC_NOTIFY,
-		BT_GATT_PERM_NONE,
-		NULL, NULL, &weight_deci_g),
+		BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE |
+		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
+		BT_GATT_PERM_WRITE,
+		NULL, weight_write_cb, weight_frame),
 	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 	BT_GATT_CHARACTERISTIC(&cmd_char_uuid.uuid,
 		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
@@ -111,6 +166,11 @@ static void bt_ready(int err)
 		LOG_ERR("Advertising failed to start (err %d)", err);
 		return;
 	}
+
+	indicate_params.attr = &weight_svc.attrs[2];
+	indicate_params.func = indicate_cb;
+	indicate_params.data = weight_frame;
+	indicate_params.len = sizeof(weight_frame);
 
 	/* Now start listening for weight updates */
 	zbus_chan_add_obs(&weight_channel, &bluetooth_sub, K_NO_WAIT);
@@ -163,19 +223,46 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			//LOG_INF("From bluetooth subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
+			/* Timemore format expects scale weight as little-endian uint32 in deci-grams at bytes 5..8. */
+			int64_t scaled_deci_g = ((int64_t)msg.weight_g.val1 * 10) +
+					       (msg.weight_g.val2 / 100000);
 
-			/* Convert grams (sensor_value) to deci-grams for a compact 16-bit payload. */
-			int32_t scaled_val1 = msg.weight_g.val1 * 10;
-			int32_t scaled_val2 = msg.weight_g.val2 / 100000;
+			if (scaled_deci_g < 0) {
+				scaled_deci_g = 0;
+			}
 
-			weight_deci_g = (int16_t)(scaled_val1 + scaled_val2);
+			if (scaled_deci_g > UINT32_MAX) {
+				scaled_deci_g = UINT32_MAX;
+			}
 
-			if (notify_enabled) {
-				int err = bt_gatt_notify(NULL, &weight_svc.attrs[2], &weight_deci_g,
-							 sizeof(weight_deci_g));
-				if (err) {
-					LOG_ERR("Failed to notify weight (err %d)", err);
+			uint32_t scale_weight = (uint32_t)scaled_deci_g;
+			weight_frame[5] = (uint8_t)(scale_weight & 0xff);
+			weight_frame[6] = (uint8_t)((scale_weight >> 8) & 0xff);
+			weight_frame[7] = (uint8_t)((scale_weight >> 16) & 0xff);
+			weight_frame[8] = (uint8_t)((scale_weight >> 24) & 0xff);
+
+			if (stream_enabled) {
+				int err;
+
+				if (use_indications) {
+					if (indicate_in_flight) {
+						continue;
+					}
+
+					indicate_params.data = weight_frame;
+					indicate_params.len = sizeof(weight_frame);
+					indicate_in_flight = true;
+					err = bt_gatt_indicate(NULL, &indicate_params);
+					if (err) {
+						indicate_in_flight = false;
+						LOG_ERR("Failed to indicate weight (err %d)", err);
+					}
+				} else {
+					err = bt_gatt_notify(NULL, &weight_svc.attrs[2],
+							 weight_frame, sizeof(weight_frame));
+					if (err) {
+						LOG_ERR("Failed to notify weight (err %d)", err);
+					}
 				}
 			}
 		}
