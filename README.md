@@ -106,7 +106,7 @@ ncs-scale/
 
 - Logging: `CONFIG_LOG`, minimal mode.
 - Messaging: `CONFIG_ZBUS` and observer/channel metadata logging.
-- Sensor: `CONFIG_HX711` and optional median + EMA filter tuning.
+- Sensor: `CONFIG_HX711`.
 - BLE: broadcaster, TX power, and advertised device name.
 - Display: framebuffer and print formatting support.
 
