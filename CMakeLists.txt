@@ -12,8 +12,11 @@ target_sources(app PRIVATE
     src/channels.c
     src/weight.c
     src/bluetooth.c
-    src/display.c
 )
+
+if(CONFIG_DISPLAY)
+    target_sources(app PRIVATE src/display.c)
+endif()
 
 target_include_directories(app PRIVATE
     include

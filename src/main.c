@@ -2,7 +2,9 @@
 
 #include "channels.h"
 #include "bluetooth.h"
+#if defined(CONFIG_DISPLAY)
 #include "display.h"
+#endif
 
 #define LOG_MODULE_NAME main
 #include <zephyr/logging/log.h>
@@ -13,7 +15,9 @@ int main(void)
         // weight thread starts itself
         zbus_print_channels_and_observers();
         bt_init();
+#if defined(CONFIG_DISPLAY)
         display_init();
+#endif
 
         while (1) {
                 log_uptime();
