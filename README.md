@@ -74,7 +74,7 @@ Why this matters:
 - `main()` initializes high-level services and prints zbus topology:
   - `zbus_print_channels_and_observers()`
   - `bt_init()`
-  - `display_init()`
+  - `display_init()` when display support is enabled
 - Weight acquisition thread starts independently from `K_THREAD_DEFINE`.
 - Main loop logs uptime periodically.
 
@@ -112,9 +112,9 @@ ncs-scale/
 
 ### CMake (`CMakeLists.txt`)
 
-- Sets `SHIELD ssd1306_128x32`.
 - Adds local module path: `modules/HX711` via `ZEPHYR_EXTRA_MODULES`.
 - Registers all source units in one app target.
+- Includes `src/display.c` only when `CONFIG_DISPLAY=y`.
 
 ### Devicetree (`boards/nrf52dk_nrf52832.overlay`)
 
@@ -133,7 +133,18 @@ Recommended workflow:
 3. Use the extension actions for Configure, Build, and Flash.
 4. Use the extension panels for Kconfig/devicetree configuration and logging.
 
-Terminal west commands are intentionally omitted from this README because those flows are already covered by the extension.
+### Enabling Display in the NCS Extension
+
+The default project configuration is headless (`CONFIG_DISPLAY=n`).
+
+For a display-enabled build profile in the extension:
+
+1. Set Shield to `ssd1306_128x32` in the build configuration.
+2. Set `CONFIG_DISPLAY=y`.
+3. Set `CONFIG_CHARACTER_FRAMEBUFFER=y`.
+4. Run a pristine configure/build from that profile.
+
+For a headless profile, leave shield unset and keep display options disabled.
 
 ## Current Design Constraints
 
