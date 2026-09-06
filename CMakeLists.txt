@@ -10,6 +10,7 @@ target_sources(app PRIVATE
     src/channels.c
     src/weight.c
     src/bluetooth.c
+    src/bluetooth_protocol.c
 )
 
 if(CONFIG_DISPLAY)

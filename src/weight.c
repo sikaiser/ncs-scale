@@ -21,10 +21,20 @@ LOG_MODULE_REGISTER(weight, CONFIG_LOG_DEFAULT_LEVEL);
 // Define the thread stack and object
 #define WEIGHT_THREAD_STACK_SIZE 1024
 #define WEIGHT_THREAD_SLEEP_MS 100 
+#define WEIGHT_DEBUG_LOG_INTERVAL_MS 5000
 
 
 // SCALE
 const struct device *hx711_dev;
+
+static int32_t weight_sensor_value_to_deci_grams(const struct sensor_value *weight)
+{
+    if (weight == NULL) {
+        return 0;
+    }
+
+    return (weight->val1 * 10) + (weight->val2 / 100000);
+}
 
 void weight_thread_entry(void *p1, void *p2, void *p3)
 {    
@@ -32,7 +42,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
     hx711_dev = DEVICE_DT_GET_ANY(avia_hx711);
 	__ASSERT(hx711_dev == NULL, "Failed to get device binding");
 
-	LOG_INF("Device is %p, name is %s", hx711_dev, hx711_dev->name);
+    LOG_DBG("Device is %p, name is %s", hx711_dev, hx711_dev->name);
 
     // Let the HX711 settle? Seems to be necessary for successful tare
 	k_msleep(100);
@@ -55,6 +65,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	data->slope.val2 = slope.val2;
     
     while (1) {
+        static int64_t last_weight_log_ms;
         const struct zbus_channel *chan;
 
         while (!zbus_sub_wait(&weight_cmd_sub, &chan, K_NO_WAIT)) {
@@ -77,26 +88,32 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
             LOG_ERR("Cannot take measurement: %d", ret);
         } else {
             sensor_channel_get(hx711_dev, HX711_SENSOR_CHAN_WEIGHT, &weight);
-        }
-        
-        // 3. Create the ZBUS message
-        struct weight_msg msg = {
-            .weight_g = weight
-        };
 
-        //LOG_INF("Publishing weight: %d.%06d grams", weight.val1, weight.val2);
+            int32_t weight_dg = weight_sensor_value_to_deci_grams(&weight);
 
-        // 4. Publish the Weight
-        // Publish reliably to the channel. 
-        // Subscribers (Display, Broadcast) will wake up asynchronously.
-        ret = zbus_chan_pub(&weight_channel, &msg, K_MSEC(500)); 
-        if (ret != 0) {
-            LOG_ERR("Failed to publish weight data: %d", ret);
-            // Handle error, e.g., K_MSEC(500) timeout was too short
+            int64_t now_ms = k_uptime_get();
+            if ((now_ms - last_weight_log_ms) >= WEIGHT_DEBUG_LOG_INTERVAL_MS) {
+				LOG_DBG("Weight sample: %d.%01d g", weight_dg / 10, abs(weight_dg % 10));
+                last_weight_log_ms = now_ms;
+            }
+
+            // 3. Create the ZBUS message
+            struct weight_msg msg = {
+                .weight_dg = weight_dg
+            };
+
+            // 4. Publish the Weight
+            ret = zbus_chan_pub(&weight_channel, &msg, K_MSEC(500));
+            if (ret != 0) {
+                LOG_ERR("Failed to publish weight data: %d", ret);
+            }
+
+            // 5. Yield/Sleep
+            k_msleep(WEIGHT_THREAD_SLEEP_MS);
+            continue;
         }
 
         // 5. Yield/Sleep
-        // Wait for the next sampling period to ensure stability and save power.
         k_msleep(WEIGHT_THREAD_SLEEP_MS);
     }
 }

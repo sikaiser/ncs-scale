@@ -39,7 +39,7 @@ static void log_uptime(void)
         uint32_t hours = minutes / 60U;
         
         // Format the log message as HH:MM:SS
-        LOG_INF("Uptime: %02d:%02d:%02d", 
+        LOG_DBG("Uptime: %02d:%02d:%02d", 
                 hours, 
                 minutes % 60U, // Minutes remainder
                 seconds % 60U  // Seconds remainder

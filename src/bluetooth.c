@@ -18,36 +18,33 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/bluetooth/gatt.h>
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
+#include "bluetooth_protocol.h"
+#define BLE_TX_DEBUG_LOG_INTERVAL_MS    5000
 
-#define TIMEMORE_WSS_SERVICE_UUID       0x181D
-#define TIMEMORE_WEIGHT_CHAR_UUID       0x2A9D
-#define TIMEMORE_COMMAND_CHAR_UUID      BT_UUID_128_ENCODE(0x553f4e49, 0xbf21, 0x4468, 0x9c6c, 0x0e4fb5b17697)
-
-#define TIMEMORE_WEIGHT_EVENT_ID        0x10
-#define TIMEMORE_WRITE_REQ_LEN          2U
-#define TIMEMORE_HEARTBEAT_LEN          1U
-#define TIMEMORE_TARE_CMD_LEN           1U
-#define TIMEMORE_TARE_CMD_BYTE          0x00U
-
+/* Advertising parameters for a single connectable central. */
 #define ADV_PARAM BT_LE_ADV_PARAM(BT_LE_ADV_OPT_CONN | BT_LE_ADV_OPT_USE_IDENTITY, \
 				  BT_GAP_ADV_FAST_INT_MIN_2, \
 				  BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
-static struct bt_uuid_16 timemore_service_uuid = BT_UUID_INIT_16(TIMEMORE_WSS_SERVICE_UUID);
-static struct bt_uuid_16 timemore_weight_uuid = BT_UUID_INIT_16(TIMEMORE_WEIGHT_CHAR_UUID);
-static struct bt_uuid_128 timemore_command_uuid = BT_UUID_INIT_128(TIMEMORE_COMMAND_CHAR_UUID);
+/* Protocol UUIDs exposed by this scale implementation. */
+static struct bt_uuid_16 scale_service_uuid = BT_UUID_INIT_16(SCALE_SERVICE_UUID);
+static struct bt_uuid_16 scale_weight_char_uuid = BT_UUID_INIT_16(SCALE_WEIGHT_CHAR_UUID);
+static struct bt_uuid_128 scale_command_char_uuid = BT_UUID_INIT_128(SCALE_COMMAND_CHAR_UUID);
 
+/* Runtime state for the active BLE session. */
 static bool weight_stream_enabled;
-static bool use_indications_for_weight;
 static bool indication_pending;
+static bool weight_stream_started;
+static struct bt_conn *active_conn;
 
-/* Timemore weight frame: [event_id][dripper_weight_le32][scale_weight_le32]. */
-static uint8_t timemore_weight_frame[9] = {
-	TIMEMORE_WEIGHT_EVENT_ID,
+/* Cached payload for the current weight indication. */
+static uint8_t weight_frame[9] = {
+	SCALE_WEIGHT_EVENT_ID,
 	0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00,
 };
 
+/* GATT callback: clear in-flight state after the central acknowledges an indication. */
 static void indicate_cb(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err)
 {
 	ARG_UNUSED(conn);
@@ -62,18 +59,22 @@ static void indicate_cb(struct bt_conn *conn, struct bt_gatt_indicate_params *pa
 
 static struct bt_gatt_indicate_params indicate_params;
 
+/* GATT callback: indication streaming is enabled only when the CCC requests indicate. */
 static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
 	ARG_UNUSED(attr);
 
-	weight_stream_enabled = (value == BT_GATT_CCC_NOTIFY || value == BT_GATT_CCC_INDICATE);
-	use_indications_for_weight = (value == BT_GATT_CCC_INDICATE);
+	weight_stream_enabled = (value & BT_GATT_CCC_INDICATE) != 0U;
 
-	LOG_INF("Weight stream %s (%s)",
-		weight_stream_enabled ? "enabled" : "disabled",
-		use_indications_for_weight ? "indicate" : "notify");
+	if (!weight_stream_enabled) {
+		weight_stream_started = false;
+	}
+
+	LOG_DBG("Weight stream %s (indicate)",
+		weight_stream_enabled ? "enabled" : "disabled");
 }
 
+/* GATT callback: the client writes here to start streaming and to send heartbeats. */
 static ssize_t weight_write_cb(struct bt_conn *conn,
 				      const struct bt_gatt_attr *attr,
 				      const void *buf,
@@ -92,9 +93,13 @@ static ssize_t weight_write_cb(struct bt_conn *conn,
 
 	const uint8_t *request = buf;
 
-	/* Timemore client writes [0x02,0x00] to start data flow and [0x00] as heartbeat. */
-	if ((len == TIMEMORE_WRITE_REQ_LEN && request[0] == 0x02U && request[1] == 0x00U) ||
-	    (len == TIMEMORE_HEARTBEAT_LEN && request[0] == 0x00U)) {
+	if (scale_protocol_is_stream_start_request(request, len)) {
+		weight_stream_started = true;
+		LOG_DBG("Weight stream start request received");
+		return len;
+	}
+
+	if (scale_protocol_is_heartbeat_request(request, len)) {
 		return len;
 	}
 
@@ -102,6 +107,7 @@ static ssize_t weight_write_cb(struct bt_conn *conn,
 	return len;
 }
 
+/* GATT callback: tare requests are forwarded onto zbus instead of touching the sensor directly. */
 static ssize_t cmd_write_cb(struct bt_conn *conn,
 				   const struct bt_gatt_attr *attr,
 				   const void *buf,
@@ -120,8 +126,7 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 
 	const uint8_t *command = buf;
 
-	/* Timemore plugin tare payload is a single byte 0x00 on the command characteristic. */
-	if (len == TIMEMORE_TARE_CMD_LEN && command[0] == TIMEMORE_TARE_CMD_BYTE) {
+	if (scale_protocol_is_tare_command(command, len)) {
 		struct button_msg msg = {
 			.tare_request = true,
 		};
@@ -132,7 +137,7 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 			return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
 		}
 
-		LOG_INF("Received tare command");
+		LOG_DBG("Received tare command");
 	} else {
 		LOG_WRN("Unsupported command byte 0x%02x", command[0]);
 	}
@@ -140,26 +145,103 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 	return len;
 }
 
+/* GATT service layout: one weight stream characteristic and one command characteristic. */
 BT_GATT_SERVICE_DEFINE(weight_svc,
-	BT_GATT_PRIMARY_SERVICE(&timemore_service_uuid),
-	BT_GATT_CHARACTERISTIC(&timemore_weight_uuid.uuid,
-		BT_GATT_CHRC_NOTIFY | BT_GATT_CHRC_INDICATE |
+	BT_GATT_PRIMARY_SERVICE(&scale_service_uuid),
+	BT_GATT_CHARACTERISTIC(&scale_weight_char_uuid.uuid,
+		BT_GATT_CHRC_INDICATE |
 		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
 		BT_GATT_PERM_WRITE,
-		NULL, weight_write_cb, timemore_weight_frame),
+		NULL, weight_write_cb, weight_frame),
 	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
-	BT_GATT_CHARACTERISTIC(&timemore_command_uuid.uuid,
+	BT_GATT_CHARACTERISTIC(&scale_command_char_uuid.uuid,
 		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
 		BT_GATT_PERM_WRITE,
 		NULL, cmd_write_cb, NULL)
 );
 
+/* Advertising payload: name + service UUID so the client can discover and classify this scale. */
 static struct bt_data ad[] = {
 	BT_DATA_BYTES(BT_DATA_FLAGS, BT_LE_AD_GENERAL | BT_LE_AD_NO_BREDR),
 	BT_DATA(BT_DATA_NAME_COMPLETE, CONFIG_BT_DEVICE_NAME, sizeof(CONFIG_BT_DEVICE_NAME) - 1),
-	BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(TIMEMORE_WSS_SERVICE_UUID))
+	BT_DATA_BYTES(BT_DATA_UUID16_ALL, BT_UUID_16_ENCODE(SCALE_SERVICE_UUID))
 };
 
+static bool adv_restart_pending;
+
+/* Advertising must be restarted after disconnect because connectable advertising stops on connect. */
+static void try_start_advertising(void)
+{
+	int err = bt_le_adv_start(ADV_PARAM, ad, ARRAY_SIZE(ad), NULL, 0);
+
+	if (err == -EALREADY) {
+		adv_restart_pending = false;
+		return;
+	}
+
+	if (err == -ENOMEM) {
+		/* No free connection objects yet; retry from recycled callback. */
+		adv_restart_pending = true;
+		LOG_WRN("Advertising restart deferred (no free conn objects)");
+		return;
+	}
+
+	if (err) {
+		adv_restart_pending = true;
+		LOG_ERR("Advertising failed to start (err %d)", err);
+		return;
+	}
+
+	adv_restart_pending = false;
+	LOG_INF("Advertising started");
+}
+
+/* Connection lifecycle callbacks keep track of the single active central connection. */
+static void connected_cb(struct bt_conn *conn, uint8_t err)
+{
+	if (err) {
+		LOG_WRN("Connection failed (err 0x%02x)", err);
+		return;
+	}
+
+	if (active_conn != NULL) {
+		bt_conn_unref(active_conn);
+	}
+
+	active_conn = bt_conn_ref(conn);
+
+	LOG_INF("Central connected");
+}
+
+static void disconnected_cb(struct bt_conn *conn, uint8_t reason)
+{
+	if (active_conn == conn) {
+		bt_conn_unref(active_conn);
+		active_conn = NULL;
+	}
+
+	LOG_INF("Central disconnected (reason 0x%02x)", reason);
+	adv_restart_pending = true;
+	weight_stream_started = false;
+	indication_pending = false;
+	try_start_advertising();
+}
+
+/* Retry advertising when the Bluetooth stack recycles the connection object. */
+static void recycled_cb(void)
+{
+	if (adv_restart_pending) {
+		try_start_advertising();
+	}
+}
+
+BT_CONN_CB_DEFINE(bt_conn_callbacks) = {
+	.connected = connected_cb,
+	.disconnected = disconnected_cb,
+	.recycled = recycled_cb,
+};
+
+/* Bluetooth stack initialization and one-time wiring. */
 static void bt_ready(int err)
 {
 	if (err) {
@@ -167,19 +249,15 @@ static void bt_ready(int err)
 		return;
 	}
 
-	LOG_INF("Bluetooth initialized\n");
+	LOG_INF("Bluetooth initialized");
 
 	/* Start advertising */
-	err = bt_le_adv_start(ADV_PARAM, ad, ARRAY_SIZE(ad), NULL, 0);
-	if (err) {
-		LOG_ERR("Advertising failed to start (err %d)", err);
-		return;
-	}
+	try_start_advertising();
 
 	indicate_params.attr = &weight_svc.attrs[2];
 	indicate_params.func = indicate_cb;
-	indicate_params.data = timemore_weight_frame;
-	indicate_params.len = sizeof(timemore_weight_frame);
+	indicate_params.data = weight_frame;
+	indicate_params.len = sizeof(weight_frame);
 
 	/* Now start listening for weight updates */
 	zbus_chan_add_obs(&weight_channel, &bluetooth_sub, K_NO_WAIT);
@@ -220,10 +298,14 @@ int bt_init(void) {
     return 0;
 }
 
-/* ZBUS SUBSCRIBER*/
+/* zbus subscriber thread: encode current weight and push it over the active BLE indication stream. */
 static void subscriber_task(void)
 {
 	const struct zbus_channel *chan;
+	uint32_t tx_ok_count = 0U;
+	uint32_t tx_fail_count = 0U;
+	uint32_t tx_skip_pending_count = 0U;
+	int64_t last_tx_log_ms = 0;
 
 	while (!zbus_sub_wait(&bluetooth_sub, &chan, K_FOREVER)) {
 
@@ -232,46 +314,39 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			/* Timemore format expects scale weight as little-endian uint32 in deci-grams at bytes 5..8. */
-			int64_t scaled_deci_grams = ((int64_t)msg.weight_g.val1 * 10) +
-					       (msg.weight_g.val2 / 100000);
+			scale_protocol_encode_weight_frame(weight_frame, msg.weight_dg);
 
-			if (scaled_deci_grams < 0) {
-				scaled_deci_grams = 0;
-			}
-
-			if (scaled_deci_grams > UINT32_MAX) {
-				scaled_deci_grams = UINT32_MAX;
-			}
-
-			uint32_t scale_weight_deci_grams = (uint32_t)scaled_deci_grams;
-			timemore_weight_frame[5] = (uint8_t)(scale_weight_deci_grams & 0xff);
-			timemore_weight_frame[6] = (uint8_t)((scale_weight_deci_grams >> 8) & 0xff);
-			timemore_weight_frame[7] = (uint8_t)((scale_weight_deci_grams >> 16) & 0xff);
-			timemore_weight_frame[8] = (uint8_t)((scale_weight_deci_grams >> 24) & 0xff);
-
-			if (weight_stream_enabled) {
+			if (weight_stream_enabled && weight_stream_started && active_conn != NULL) {
 				int err;
 
-				if (use_indications_for_weight) {
-					if (indication_pending) {
-						continue;
-					}
+				if (indication_pending) {
+					tx_skip_pending_count++;
+					continue;
+				}
 
-					indicate_params.data = timemore_weight_frame;
-					indicate_params.len = sizeof(timemore_weight_frame);
-					indication_pending = true;
-					err = bt_gatt_indicate(NULL, &indicate_params);
-					if (err) {
-						indication_pending = false;
-						LOG_ERR("Failed to indicate weight (err %d)", err);
-					}
+				indication_pending = true;
+				err = bt_gatt_indicate(active_conn, &indicate_params);
+				if (err) {
+					indication_pending = false;
+					tx_fail_count++;
+					LOG_ERR("Failed to indicate weight (err %d)", err);
 				} else {
-					err = bt_gatt_notify(NULL, &weight_svc.attrs[2],
-							 timemore_weight_frame, sizeof(timemore_weight_frame));
-					if (err) {
-						LOG_ERR("Failed to notify weight (err %d)", err);
-					}
+					tx_ok_count++;
+				}
+
+				int64_t now_ms = k_uptime_get();
+				if ((now_ms - last_tx_log_ms) >= BLE_TX_DEBUG_LOG_INTERVAL_MS) {
+					LOG_DBG("BLE TX mode=indicate hdr=%02x weight_dg=%u frame=[%02x %02x %02x %02x] ok=%u fail=%u skip=%u",
+						weight_frame[0],
+						msg.weight_dg < 0 ? 0 : (uint32_t)msg.weight_dg,
+						weight_frame[5],
+						weight_frame[6],
+						weight_frame[7],
+						weight_frame[8],
+						tx_ok_count,
+						tx_fail_count,
+						tx_skip_pending_count);
+					last_tx_log_ms = now_ms;
 				}
 			}
 		}

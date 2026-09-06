@@ -16,7 +16,6 @@ LOG_MODULE_REGISTER(display, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/device.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/display/cfb.h>
-#include <zephyr/drivers/sensor.h>
 
 
 static const struct device *display;
@@ -87,16 +86,21 @@ void draw_icon(const struct device *display, const uint8_t *icon, uint16_t x_sta
 	}
 }
 
-void display_weight(const struct device *display, struct sensor_value weight, 
+void display_weight(const struct device *display, int32_t weight_dg,
                    bool bt_connected, bool wifi_connected, uint8_t battery_pct)
 {
     char weight_str[16];
+    bool negative = weight_dg < 0;
+    int32_t abs_weight_dg = negative ? -weight_dg : weight_dg;
     
     // Clear display
     cfb_framebuffer_clear(display, false);
     
     // Display weight in large text (center of screen)
-    snprintf(weight_str, sizeof(weight_str), "%3d.%1d", weight.val1, abs(weight.val2 / 100000));
+    snprintf(weight_str, sizeof(weight_str), "%s%ld.%1ld",
+             negative ? "-" : "",
+             (long)(abs_weight_dg / 10),
+             (long)(abs_weight_dg % 10));
     cfb_print(display, weight_str, 0, 0);
     
     // Draw status icons at top right
@@ -163,13 +167,11 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			//LOG_INF("From display subscriber -> Weight= %d.%06d grams", msg.weight_g.val1, msg.weight_g.val2);
-
 			bool bt_conn = true;
 			bool wifi_conn = false;
 			uint8_t batt = 85;
 
-			display_weight(display, msg.weight_g, bt_conn, wifi_conn, batt);
+            display_weight(display, msg.weight_dg, bt_conn, wifi_conn, batt);
 
 		}
 	}
