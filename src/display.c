@@ -86,21 +86,21 @@ void draw_icon(const struct device *display, const uint8_t *icon, uint16_t x_sta
 	}
 }
 
-void display_weight(const struct device *display, int32_t weight_dg,
+void display_weight(const struct device *display, int32_t weight_cg,
                    bool bt_connected, bool wifi_connected, uint8_t battery_pct)
 {
     char weight_str[16];
-    bool negative = weight_dg < 0;
-    int32_t abs_weight_dg = negative ? -weight_dg : weight_dg;
+    bool negative = weight_cg < 0;
+    int32_t abs_weight_cg = negative ? -weight_cg : weight_cg;
     
     // Clear display
     cfb_framebuffer_clear(display, false);
     
     // Display weight in large text (center of screen)
-    snprintf(weight_str, sizeof(weight_str), "%s%ld.%1ld",
+    snprintf(weight_str, sizeof(weight_str), "%s%ld.%02ld",
              negative ? "-" : "",
-             (long)(abs_weight_dg / 10),
-             (long)(abs_weight_dg % 10));
+             (long)(abs_weight_cg / 100),
+             (long)(abs_weight_cg % 100));
     cfb_print(display, weight_str, 0, 0);
     
     // Draw status icons at top right
@@ -171,7 +171,7 @@ static void subscriber_task(void)
 			bool wifi_conn = false;
 			uint8_t batt = 85;
 
-            display_weight(display, msg.weight_dg, bt_conn, wifi_conn, batt);
+            display_weight(display, msg.weight_cg, bt_conn, wifi_conn, batt);
 
 		}
 	}

@@ -19,6 +19,9 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 #include <zephyr/bluetooth/hci.h>
 #include <zephyr/bluetooth/uuid.h>
 #include "bluetooth_protocol.h"
+
+#include <string.h>
+
 #define BLE_TX_DEBUG_LOG_INTERVAL_MS    5000
 
 /* Advertising parameters for a single connectable central. */
@@ -26,85 +29,33 @@ LOG_MODULE_REGISTER(bluetooth, CONFIG_LOG_DEFAULT_LEVEL);
 				  BT_GAP_ADV_FAST_INT_MIN_2, \
 				  BT_GAP_ADV_FAST_INT_MAX_2, NULL)
 
-/* Protocol UUIDs exposed by this scale implementation. */
+/* Varia-compatible UUIDs exposed by this scale implementation. */
 static struct bt_uuid_16 scale_service_uuid = BT_UUID_INIT_16(SCALE_SERVICE_UUID);
 static struct bt_uuid_16 scale_weight_char_uuid = BT_UUID_INIT_16(SCALE_WEIGHT_CHAR_UUID);
-static struct bt_uuid_128 scale_command_char_uuid = BT_UUID_INIT_128(SCALE_COMMAND_CHAR_UUID);
+static struct bt_uuid_16 scale_command_char_uuid = BT_UUID_INIT_16(SCALE_COMMAND_CHAR_UUID);
 
 /* Runtime state for the active BLE session. */
 static bool weight_stream_enabled;
-static bool indication_pending;
-static bool weight_stream_started;
 static struct bt_conn *active_conn;
 
-/* Cached payload for the current weight indication. */
-static uint8_t weight_frame[9] = {
-	SCALE_WEIGHT_EVENT_ID,
+/* Cached payload for the current weight notification. */
+static uint8_t weight_frame[SCALE_WEIGHT_FRAME_LEN] = {
+	SCALE_SYSTEM_MESSAGE_ID,
 	0x00, 0x00, 0x00, 0x00,
-	0x00, 0x00, 0x00, 0x00,
+	0x00, 0x00,
 };
+/* Pre-encoded Varia tare packet used for byte-exact command matching. */
+static uint8_t tare_command[SCALE_TARE_PACKET_LEN];
 
-/* GATT callback: clear in-flight state after the central acknowledges an indication. */
-static void indicate_cb(struct bt_conn *conn, struct bt_gatt_indicate_params *params, uint8_t err)
-{
-	ARG_UNUSED(conn);
-	ARG_UNUSED(params);
-
-	indication_pending = false;
-
-	if (err) {
-		LOG_WRN("Weight indication completed with ATT err 0x%02x", err);
-	}
-}
-
-static struct bt_gatt_indicate_params indicate_params;
-
-/* GATT callback: indication streaming is enabled only when the CCC requests indicate. */
+/* GATT callback: weight streaming is enabled when the client subscribes for notifications. */
 static void ccc_cfg_changed(const struct bt_gatt_attr *attr, uint16_t value)
 {
 	ARG_UNUSED(attr);
 
-	weight_stream_enabled = (value & BT_GATT_CCC_INDICATE) != 0U;
+	weight_stream_enabled = (value & BT_GATT_CCC_NOTIFY) != 0U;
 
-	if (!weight_stream_enabled) {
-		weight_stream_started = false;
-	}
-
-	LOG_DBG("Weight stream %s (indicate)",
+	LOG_INF("Weight stream %s (notify)",
 		weight_stream_enabled ? "enabled" : "disabled");
-}
-
-/* GATT callback: the client writes here to start streaming and to send heartbeats. */
-static ssize_t weight_write_cb(struct bt_conn *conn,
-				      const struct bt_gatt_attr *attr,
-				      const void *buf,
-				      uint16_t len,
-				      uint16_t offset,
-				      uint8_t flags)
-{
-	ARG_UNUSED(conn);
-	ARG_UNUSED(attr);
-	ARG_UNUSED(offset);
-	ARG_UNUSED(flags);
-
-	if (len == 0U) {
-		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
-	}
-
-	const uint8_t *request = buf;
-
-	if (scale_protocol_is_stream_start_request(request, len)) {
-		weight_stream_started = true;
-		LOG_DBG("Weight stream start request received");
-		return len;
-	}
-
-	if (scale_protocol_is_heartbeat_request(request, len)) {
-		return len;
-	}
-
-	LOG_WRN("Unexpected 2A9D write (len %u, first 0x%02x)", len, request[0]);
-	return len;
 }
 
 /* GATT callback: tare requests are forwarded onto zbus instead of touching the sensor directly. */
@@ -120,13 +71,14 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 	ARG_UNUSED(offset);
 	ARG_UNUSED(flags);
 
-	if (len == 0U) {
+	if (len != SCALE_TARE_PACKET_LEN) {
 		return BT_GATT_ERR(BT_ATT_ERR_INVALID_ATTRIBUTE_LEN);
 	}
 
 	const uint8_t *command = buf;
 
-	if (scale_protocol_is_tare_command(command, len)) {
+	/* Varia clients send a fixed 5-byte tare packet on FFF2. */
+	if (memcmp(command, tare_command, SCALE_TARE_PACKET_LEN) == 0) {
 		struct button_msg msg = {
 			.tare_request = true,
 		};
@@ -137,7 +89,7 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 			return BT_GATT_ERR(BT_ATT_ERR_UNLIKELY);
 		}
 
-		LOG_DBG("Received tare command");
+		LOG_INF("Received tare command");
 	} else {
 		LOG_WRN("Unsupported command byte 0x%02x", command[0]);
 	}
@@ -149,10 +101,9 @@ static ssize_t cmd_write_cb(struct bt_conn *conn,
 BT_GATT_SERVICE_DEFINE(weight_svc,
 	BT_GATT_PRIMARY_SERVICE(&scale_service_uuid),
 	BT_GATT_CHARACTERISTIC(&scale_weight_char_uuid.uuid,
-		BT_GATT_CHRC_INDICATE |
-		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
-		BT_GATT_PERM_WRITE,
-		NULL, weight_write_cb, weight_frame),
+		BT_GATT_CHRC_NOTIFY,
+		BT_GATT_PERM_NONE,
+		NULL, NULL, weight_frame),
 	BT_GATT_CCC(ccc_cfg_changed, BT_GATT_PERM_READ | BT_GATT_PERM_WRITE),
 	BT_GATT_CHARACTERISTIC(&scale_command_char_uuid.uuid,
 		BT_GATT_CHRC_WRITE | BT_GATT_CHRC_WRITE_WITHOUT_RESP,
@@ -222,8 +173,6 @@ static void disconnected_cb(struct bt_conn *conn, uint8_t reason)
 
 	LOG_INF("Central disconnected (reason 0x%02x)", reason);
 	adv_restart_pending = true;
-	weight_stream_started = false;
-	indication_pending = false;
 	try_start_advertising();
 }
 
@@ -253,17 +202,13 @@ static void bt_ready(int err)
 
 	/* Start advertising */
 	try_start_advertising();
-
-	indicate_params.attr = &weight_svc.attrs[2];
-	indicate_params.func = indicate_cb;
-	indicate_params.data = weight_frame;
-	indicate_params.len = sizeof(weight_frame);
+	scale_protocol_encode_tare_command(tare_command);
 
 	/* Now start listening for weight updates */
 	zbus_chan_add_obs(&weight_channel, &bluetooth_sub, K_NO_WAIT);
 }
 
-// for switch to external antenna
+/* Optional external antenna support kept here for later board-specific use. */
 /*
 #define RFSW_REGULATOR_NODE DT_NODELABEL(rfsw_ctl)
 static const struct gpio_dt_spec rfsw_gpio = {
@@ -273,7 +218,8 @@ static const struct gpio_dt_spec rfsw_gpio = {
 };
 */
 
-int bt_init(void) {
+int bt_init(void)
+{
 
     /*
     // Configure antenna switch
@@ -289,22 +235,22 @@ int bt_init(void) {
     }
     */
 
-    // Initialize the Bluetooth Subsystem
+	/* Initialize the Bluetooth subsystem. */
 	int err = bt_enable(bt_ready);
 	if (err) {
 		LOG_ERR("Bluetooth init failed (err %d)", err);
 		return -1;
 	}
-    return 0;
+
+	return 0;
 }
 
-/* zbus subscriber thread: encode current weight and push it over the active BLE indication stream. */
+/* zbus subscriber thread: encode current weight and push it over the active BLE notify stream. */
 static void subscriber_task(void)
 {
 	const struct zbus_channel *chan;
 	uint32_t tx_ok_count = 0U;
 	uint32_t tx_fail_count = 0U;
-	uint32_t tx_skip_pending_count = 0U;
 	int64_t last_tx_log_ms = 0;
 
 	while (!zbus_sub_wait(&bluetooth_sub, &chan, K_FOREVER)) {
@@ -314,38 +260,31 @@ static void subscriber_task(void)
 
 			zbus_chan_read(&weight_channel, &msg, K_MSEC(500));
 
-			scale_protocol_encode_weight_frame(weight_frame, msg.weight_dg);
+			scale_protocol_encode_weight_frame(weight_frame, msg.weight_cg);
 
-			if (weight_stream_enabled && weight_stream_started && active_conn != NULL) {
+			if (weight_stream_enabled && active_conn != NULL) {
 				int err;
 
-				if (indication_pending) {
-					tx_skip_pending_count++;
-					continue;
-				}
-
-				indication_pending = true;
-				err = bt_gatt_indicate(active_conn, &indicate_params);
+				err = bt_gatt_notify(active_conn, &weight_svc.attrs[2],
+						     weight_frame, sizeof(weight_frame));
 				if (err) {
-					indication_pending = false;
 					tx_fail_count++;
-					LOG_ERR("Failed to indicate weight (err %d)", err);
+					LOG_ERR("Failed to notify weight (err %d)", err);
 				} else {
 					tx_ok_count++;
 				}
 
 				int64_t now_ms = k_uptime_get();
 				if ((now_ms - last_tx_log_ms) >= BLE_TX_DEBUG_LOG_INTERVAL_MS) {
-					LOG_DBG("BLE TX mode=indicate hdr=%02x weight_dg=%u frame=[%02x %02x %02x %02x] ok=%u fail=%u skip=%u",
+					LOG_INF("BLE TX mode=notify hdr=%02x weight_cg=%u frame=[%02x %02x %02x %02x] ok=%u fail=%u",
 						weight_frame[0],
-						msg.weight_dg < 0 ? 0 : (uint32_t)msg.weight_dg,
+						msg.weight_cg < 0 ? 0 : (uint32_t)msg.weight_cg,
+						weight_frame[3],
+						weight_frame[4],
 						weight_frame[5],
 						weight_frame[6],
-						weight_frame[7],
-						weight_frame[8],
 						tx_ok_count,
-						tx_fail_count,
-						tx_skip_pending_count);
+						tx_fail_count);
 					last_tx_log_ms = now_ms;
 				}
 			}

@@ -27,13 +27,13 @@ LOG_MODULE_REGISTER(weight, CONFIG_LOG_DEFAULT_LEVEL);
 // SCALE
 const struct device *hx711_dev;
 
-static int32_t weight_sensor_value_to_deci_grams(const struct sensor_value *weight)
+static int32_t weight_sensor_value_to_centi_grams(const struct sensor_value *weight)
 {
     if (weight == NULL) {
         return 0;
     }
 
-    return (weight->val1 * 10) + (weight->val2 / 100000);
+    return (weight->val1 * 100) + (weight->val2 / 10000);
 }
 
 void weight_thread_entry(void *p1, void *p2, void *p3)
@@ -42,7 +42,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
     hx711_dev = DEVICE_DT_GET_ANY(avia_hx711);
 	__ASSERT(hx711_dev == NULL, "Failed to get device binding");
 
-    LOG_DBG("Device is %p, name is %s", hx711_dev, hx711_dev->name);
+    LOG_INF("Device is %p, name is %s", hx711_dev, hx711_dev->name);
 
     // Let the HX711 settle? Seems to be necessary for successful tare
 	k_msleep(100);
@@ -89,17 +89,17 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
         } else {
             sensor_channel_get(hx711_dev, HX711_SENSOR_CHAN_WEIGHT, &weight);
 
-            int32_t weight_dg = weight_sensor_value_to_deci_grams(&weight);
+            int32_t weight_cg = weight_sensor_value_to_centi_grams(&weight);
 
             int64_t now_ms = k_uptime_get();
             if ((now_ms - last_weight_log_ms) >= WEIGHT_DEBUG_LOG_INTERVAL_MS) {
-				LOG_DBG("Weight sample: %d.%01d g", weight_dg / 10, abs(weight_dg % 10));
+                LOG_INF("Weight sample: %d.%02d g", weight_cg / 100, abs(weight_cg % 100));
                 last_weight_log_ms = now_ms;
             }
 
             // 3. Create the ZBUS message
             struct weight_msg msg = {
-                .weight_dg = weight_dg
+                .weight_cg = weight_cg
             };
 
             // 4. Publish the Weight
