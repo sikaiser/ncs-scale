@@ -276,7 +276,7 @@ static void subscriber_task(void)
 
 				int64_t now_ms = k_uptime_get();
 				if ((now_ms - last_tx_log_ms) >= BLE_TX_DEBUG_LOG_INTERVAL_MS) {
-					LOG_INF("BLE TX mode=notify hdr=%02x weight_cg=%u frame=[%02x %02x %02x %02x] ok=%u fail=%u",
+					LOG_DBG("BLE TX mode=notify hdr=%02x weight_cg=%u frame=[%02x %02x %02x %02x] ok=%u fail=%u",
 						weight_frame[0],
 						msg.weight_cg < 0 ? 0 : (uint32_t)msg.weight_cg,
 						weight_frame[3],

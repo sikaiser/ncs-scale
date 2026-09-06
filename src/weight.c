@@ -51,7 +51,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	int offset;
 	offset = avia_hx711_tare(hx711_dev, 10);
         
-	LOG_INF("Tare offset: %d\n", offset);
+    LOG_INF("Tare offset: %d", offset);
 
     zbus_chan_add_obs(&button_channel, &weight_cmd_sub, K_NO_WAIT);
 
@@ -93,7 +93,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 
             int64_t now_ms = k_uptime_get();
             if ((now_ms - last_weight_log_ms) >= WEIGHT_DEBUG_LOG_INTERVAL_MS) {
-                LOG_INF("Weight sample: %d.%02d g", weight_cg / 100, abs(weight_cg % 100));
+				LOG_DBG("Weight sample: %d.%02d g", weight_cg / 100, abs(weight_cg % 100));
                 last_weight_log_ms = now_ms;
             }
 
