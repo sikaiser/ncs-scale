@@ -39,8 +39,13 @@ static int32_t weight_sensor_value_to_centi_grams(const struct sensor_value *wei
 void weight_thread_entry(void *p1, void *p2, void *p3)
 {    
     // 1. Initial setup and calibration (Tare here or during startup)
-    hx711_dev = DEVICE_DT_GET_ANY(avia_hx711);
-	__ASSERT(hx711_dev == NULL, "Failed to get device binding");
+    hx711_dev = DEVICE_DT_GET_ANY(HX711_DT_DRV_COMPAT);
+    __ASSERT(hx711_dev != NULL, "Failed to get device binding");
+
+    if (!device_is_ready(hx711_dev)) {
+        LOG_ERR("HX711 device is not ready");
+        return;
+    }
 
     LOG_INF("Device is %p, name is %s", hx711_dev, hx711_dev->name);
 
@@ -59,10 +64,14 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 	//calibrateWKnownWeight(337); // 337g = 0.000920
 
     // Set slope using known value (from above calibration)
-	const struct sensor_value slope = { .val1 = 0, .val2 = 920 };
-	struct hx711_data *data = hx711_dev->data;
-	data->slope.val1 = slope.val1;
-	data->slope.val2 = slope.val2;
+    const struct sensor_value slope = { .val1 = 0, .val2 = 920 };
+    int slope_ret = sensor_attr_set(hx711_dev,
+                       HX711_SENSOR_CHAN_WEIGHT,
+                       (enum sensor_attribute)HX711_SENSOR_ATTR_SLOPE,
+                       &slope);
+    if (slope_ret != 0) {
+        LOG_ERR("Failed to set HX711 slope: %d", slope_ret);
+    }
     
     while (1) {
         static int64_t last_weight_log_ms;
