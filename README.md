@@ -4,24 +4,28 @@ Smart scale firmware built with nRF Connect SDK (Zephyr) for Nordic nRF52 boards
 
 This application reads weight from an HX711 load cell amplifier, publishes measurements over Zephyr zbus, exposes a connected Bluetooth LE GATT interface for a Gaggiuino-compatible scale client, and can render live values on an SSD1306 display.
 
+The current BLE implementation emulates a Varia AKU-style scale profile.
+
+The advertised device name should keep a `Varia AKU`-compatible prefix so clients that match by name continue to recognize the device.
+
 ## Architecture Overview
 
 The design follows a small event-driven pipeline:
 
 1. `weight.c` samples the HX711 sensor in its own thread.
-2. Each sample is converted to deci-grams and published to `weight_channel` on zbus.
+2. Each sample is converted to centi-grams and published to `weight_channel` on zbus.
 3. Subscribers react asynchronously:
-  - `bluetooth.c` encodes and indicates BLE weight frames.
+  - `bluetooth.c` encodes and notifies BLE weight frames.
   - `display.c` updates the framebuffer and draws status icons.
 4. BLE command writes are forwarded onto `button_channel` so tare stays decoupled from the transport layer.
 
 ```mermaid
 flowchart LR
     HX711[HX711 sensor\nmodules/HX711] -->|sensor_sample_fetch| WT[Weight thread\nsrc/weight.c]
-    WT -->|zbus_chan_pub weight_dg| ZB[(weight_channel\nsrc/channels.c)]
+    WT -->|zbus_chan_pub weight_cg| ZB[(weight_channel\nsrc/channels.c)]
     ZB --> BT[BLE subscriber thread\nsrc/bluetooth.c]
     ZB --> DSP[Display subscriber thread\nsrc/display.c]
-    BT --> GATT[BLE indication stream\nweight characteristic]
+    BT --> GATT[BLE notification stream\nweight characteristic]
     DSP --> OLED[SSD1306 128x32\ncharacter framebuffer]
     BLECMD[BLE command write] -->|zbus tare_request| BTN[(button_channel\nsrc/channels.c)]
     BTN --> WT
@@ -34,7 +38,7 @@ flowchart LR
 - Own dedicated thread (`K_THREAD_DEFINE`) samples every 100 ms.
 - Acquires HX711 using devicetree (`DEVICE_DT_GET_ANY(avia_hx711)`).
 - Performs startup tare and applies a configured slope for conversion.
-- Converts the reading to signed deci-grams (`0.1g`) and publishes `struct weight_msg` to zbus (`weight_channel`).
+- Converts the reading to signed centi-grams (`0.01g`) and publishes `struct weight_msg` to zbus (`weight_channel`).
 
 Why this matters:
 - Sensor sampling is isolated from output transport and UI refresh.
@@ -45,7 +49,7 @@ Why this matters:
 
 - Uses Zephyr zbus to decouple producer and consumers.
 - Defines channels:
-  - `weight_channel` carrying `struct weight_msg { int32_t weight_dg; }`.
+  - `weight_channel` carrying `struct weight_msg { int32_t weight_cg; }`.
   - `button_channel` carrying `struct button_msg { bool tare_request; }`.
 - Includes utility logging to inspect channels and attached observers at runtime.
 
@@ -57,22 +61,22 @@ Why this matters:
 
 - Initializes Zephyr Bluetooth stack and starts connectable LE advertising.
 - Exposes a GATT service with:
-  - Weight characteristic: `0x2A9D`
-  - Command characteristic: `553f4e49-bf21-4468-9c6c-0e4fb5b17697`
-- Starts weight streaming only after the client enables indications and sends the expected stream-start write.
-- Sends weight updates as indications on each `weight_channel` update.
-- Converts incoming tare command writes into `button_channel` messages.
+  - Service UUID: `0xFFF0`
+  - Weight characteristic: `0xFFF1`
+  - Command characteristic: `0xFFF2`
+- Sends weight updates as notifications on each `weight_channel` update after the client subscribes.
+- Converts incoming Varia tare command writes into `button_channel` messages.
 
 Implementation notes:
-- Internal weight is already in deci-grams, so protocol packing is just frame encoding.
-- The helper module `bluetooth_protocol.c` contains protocol-specific request matching and frame packing.
+- Internal weight is already in centi-grams, so protocol packing is just frame encoding.
+- The helper module `bluetooth_protocol.c` contains protocol-specific frame packing.
 - Advertising is restarted after disconnect so the scale becomes discoverable again without reboot.
 
 ### 4) Display Rendering (`src/display.c`)
 
 - Uses chosen display device from devicetree (`DT_CHOSEN(zephyr_display)`).
 - Initializes Character Framebuffer (CFB) API.
-- Subscriber listens to deci-gram weight updates and redraws:
+- Subscriber listens to centi-gram weight updates and redraws:
   - Numeric weight value.
   - Status icons (Bluetooth, Wi-Fi placeholder, battery).
 
@@ -162,7 +166,7 @@ For a headless profile, leave shield unset and keep display options disabled.
 
 - Sensor path assumes a single HX711 instance (`DEVICE_DT_GET_ANY`).
 - BLE interface currently assumes a single connected central and a single protocol shape.
-- Internal application weight unit is deci-grams (`0.1g`).
+- Internal application weight unit is centi-grams (`0.01g`).
 - Display support is optional and only enabled in display builds.
 
 These are good next abstraction points if you plan to create product variants (headless mode, dual-scale inputs, or alternate BLE protocols).
@@ -172,7 +176,7 @@ These are good next abstraction points if you plan to create product variants (h
 Recommended safe extension pattern:
 
 1. Keep sensor acquisition as producer-only logic.
-2. Keep app-level weight data in deci-grams and convert only at hardware/protocol boundaries.
+2. Keep app-level weight data in centi-grams and convert only at hardware/protocol boundaries.
 3. Add new zbus channels or reuse `weight_channel` for additional subscribers.
 4. Implement protocol-specific payload adapters instead of hardcoding in subscriber loop.
 5. Gate optional features with Kconfig flags so one codebase can serve multiple builds.
