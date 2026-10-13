@@ -12,12 +12,18 @@
 // You can also visit the nRF DeviceTree extension documentation at https://docs.nordicsemi.com/bundle/nrf-connect-vscode/page/guides/ncs_configure_app.html#devicetree-support-in-the-extension
 
 /{
-	hx711 {
+	hx711_left: hx711-left {
 		compatible = "avia,hx711";
 		status = "okay";
-		label = "HX711";
 		dout-gpios = <&gpio0 24 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP) >;
 		sck-gpios = <&gpio0 25 GPIO_ACTIVE_HIGH>;
 		//rate-gpios = <&gpio0 2 GPIO_ACTIVE_HIGH>;
+	};
+
+	hx711_right: hx711-right {
+		compatible = "avia,hx711";
+		status = "okay";
+		dout-gpios = <&gpio0 26 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP) >;
+		sck-gpios = <&gpio0 27 GPIO_ACTIVE_HIGH>;
 	};
 };
