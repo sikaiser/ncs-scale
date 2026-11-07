@@ -1,9 +1,15 @@
 / {
-	hx711 {
+	hx711_left: hx711-left {
 		compatible = "avia,hx711";
 		status = "okay";
-		label = "HX711";
 		dout-gpios = <&gpio0 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
 		sck-gpios = <&gpio0 17 GPIO_ACTIVE_HIGH>;
+	};
+
+	hx711_right: hx711-right {
+		compatible = "avia,hx711";
+		status = "okay";
+		dout-gpios = <&gpio0 22 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		sck-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
 	};
 };
