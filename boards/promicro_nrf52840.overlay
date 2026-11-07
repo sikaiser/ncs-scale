@@ -13,3 +13,14 @@
 		sck-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
 	};
 };
+
+&gpio0 { /* To enable vcc, P0.13 has to be set high */
+    status = "okay";
+
+    vcc_enable {
+        gpio-hog;
+        gpios = <13 GPIO_ACTIVE_HIGH>;
+        output-high;                   /* Forces the pin high on boot */
+    };
+};
+
