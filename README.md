@@ -100,6 +100,7 @@ ncs-scale/
   prj.conf                    # Zephyr/NCS Kconfig selections
   boards/
     nrf52dk_nrf52832.overlay  # HX711 GPIO wiring for this board
+    promicro_nrf52840.overlay # HX711 GPIO wiring for the nice!nano
   include/
     bluetooth.h
     bluetooth_protocol.h
@@ -148,6 +149,25 @@ Recommended workflow:
 2. Select the board target (`nrf52dk/nrf52832`) in the extension UI.
 3. Use the extension actions for Configure, Build, and Flash.
 4. Use the extension panels for Kconfig/devicetree configuration and logging.
+
+### nice!nano Build and USB Flashing
+
+The following configuration was tested with nRF Connect SDK v3.1.1 and its matching toolchain. It targets a nice!nano with the Adafruit UF2 bootloader and the S140 v6-compatible flash layout.
+
+1. Create a separate build configuration for `promicro_nrf52840/nrf52840/uf2`.
+2. Select `boards/promicro_nrf52840.overlay` as the devicetree overlay. It configures HX711 clock on D2/P0.17 and data on D3/P0.20.
+3. Add `-DSB_CONFIG_PARTITION_MANAGER=n` to the extra CMake arguments. This allows the board's devicetree flash partitions to control the application layout instead of NCS Partition Manager.
+4. Build pristinely. Confirm the build log reports the overlay and check that `build/nice_nano/ncs-scale/zephyr/linker.cmd` places `FLASH` at `0x26000` with a size of `0xc6000`. The UF2 output should also start at `0x26000`. Adjust the path if you chose a different build directory.
+
+To flash over USB, connect a USB data cable and double-tap reset, or briefly connect RST to GND twice. When the `NICENANO` drive appears, copy `build/nice_nano/ncs-scale/zephyr/zephyr.uf2` to it. The drive should disappear as the board restarts. Confirm the application is running by looking for `Varia AKU DIY` in a BLE scanner and testing weight readings and tare with the HX711 connected and powered. A single reset should start the application; a double reset should return to the bootloader.
+
+To flash with a J-Link instead, select the J-Link runner explicitly. For example, from an nRF Connect terminal at the application root:
+
+```powershell
+west flash -d build/nice_nano -r jlink -i <J-LINK-serial-number> --no-erase
+```
+
+If the terminal is already in the build directory, use `-d .`. Do not use a full-chip erase or recovery for routine flashing: either can erase the USB bootloader. After SWD flashing, the bootloader may not recognize the application; if the board remains in bootloader mode, try copying the UF2 file to its USB drive. Verify the bootloader and application both still work after flashing.
 
 ### Enabling Display in the NCS Extension
 
