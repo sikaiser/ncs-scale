@@ -161,6 +161,8 @@ The following configuration was tested with nRF Connect SDK v3.1.1 and its match
 
 To flash over USB, connect a USB data cable and double-tap reset, or briefly connect RST to GND twice. When the `NICENANO` drive appears, copy `build/nice_nano/ncs-scale/zephyr/zephyr.uf2` to it. The drive should disappear as the board restarts. Do not use a full-chip erase or recovery for routine flashing: either can erase the USB bootloader. After SWD flashing, the bootloader may not recognize the application; if the board remains in bootloader mode, try copying the UF2 file to its USB drive.
 
+To flash via the J-Link debugger, run `west flash -d . -r jlink -i 000801054496 --no-erase` in a terminal with the NRF connect profile. Flashing via the UI defaults to uf2 mode and doesn't work.
+
 ### Enabling Display in the NCS Extension
 
 The default project configuration is headless (`CONFIG_DISPLAY=n`).
