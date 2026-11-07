@@ -2,8 +2,8 @@
 	hx711_left: hx711-left {
 		compatible = "avia,hx711";
 		status = "okay";
-		dout-gpios = <&gpio0 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		sck-gpios = <&gpio0 17 GPIO_ACTIVE_HIGH>;
+		dout-gpios = <&gpio0 17 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		sck-gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;
 	};
 
 	hx711_right: hx711-right {
