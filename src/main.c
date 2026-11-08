@@ -2,18 +2,24 @@
 
 #include "channels.h"
 #include "bluetooth.h"
+#if defined(CONFIG_DISPLAY)
 #include "display.h"
+#endif
 
 #define LOG_MODULE_NAME main
 #include <zephyr/logging/log.h>
 LOG_MODULE_REGISTER(main, CONFIG_LOG_DEFAULT_LEVEL);
+
+static void log_uptime(void);
 
 int main(void)
 {
         // weight thread starts itself
         zbus_print_channels_and_observers();
         bt_init();
+#if defined(CONFIG_DISPLAY)
         display_init();
+#endif
 
         while (1) {
                 log_uptime();
@@ -23,7 +29,8 @@ int main(void)
 	return 0;
 }
 
-void log_uptime(void) {
+static void log_uptime(void)
+{
         int64_t uptime_ms = k_uptime_get();
 
         // Convert milliseconds to seconds, minutes, and hours
@@ -32,7 +39,7 @@ void log_uptime(void) {
         uint32_t hours = minutes / 60U;
         
         // Format the log message as HH:MM:SS
-        LOG_INF("Uptime: %02d:%02d:%02d", 
+        LOG_DBG("Uptime: %02d:%02d:%02d", 
                 hours, 
                 minutes % 60U, // Minutes remainder
                 seconds % 60U  // Seconds remainder
