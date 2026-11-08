@@ -66,12 +66,15 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
     //calibrateWKnownWeight(337, 0); // Calibrate HX711 0 (left) with 337g
 
     // Set slope using known value (from above calibration)
-    const struct sensor_value slope = { .val1 = 0, .val2 = 920 };
+    const struct sensor_value slopes[HX711_COUNT] = {
+        { .val1 = 0, .val2 = 282 },
+        { .val1 = 0, .val2 = -281 },
+    };
 	for (int i = 0; i < HX711_COUNT; i++) {
 		int slope_ret = sensor_attr_set(hx711_devices[i],
 						HX711_SENSOR_CHAN_WEIGHT,
 						(enum sensor_attribute)HX711_SENSOR_ATTR_SLOPE,
-						&slope);
+						&slopes[i]);
 		if (slope_ret != 0) {
 			LOG_ERR("Failed to set HX711 %d slope: %d", i, slope_ret);
 		}
