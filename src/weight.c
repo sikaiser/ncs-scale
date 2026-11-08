@@ -63,12 +63,12 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
     zbus_chan_add_obs(&button_channel, &weight_cmd_sub, K_NO_WAIT);
 
 	// Calibrate and identify slope using known weight
-    //calibrateWKnownWeight(337, 0); // Calibrate HX711 0 (left) with 337g
+    //calibrateWKnownWeight(337, 0); // Calibrate HX711 0 (left / drain pipe) with 337g
 
     // Set slope using known value (from above calibration)
     const struct sensor_value slopes[HX711_COUNT] = {
-        { .val1 = 0, .val2 = 282 },
-        { .val1 = 0, .val2 = -281 },
+        { .val1 = 0, .val2 = 399 },
+        { .val1 = 0, .val2 = -391 },
     };
 	for (int i = 0; i < HX711_COUNT; i++) {
 		int slope_ret = sensor_attr_set(hx711_devices[i],
