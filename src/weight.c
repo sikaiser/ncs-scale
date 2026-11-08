@@ -40,8 +40,8 @@ static int32_t weight_sensor_value_to_centi_grams(const struct sensor_value *wei
 void weight_thread_entry(void *p1, void *p2, void *p3)
 {    
     // 1. Initial setup and calibration (Tare here or during startup)
-    hx711_devices[0] = DEVICE_DT_GET(DT_NODELABEL(hx711_left));
-    hx711_devices[1] = DEVICE_DT_GET(DT_NODELABEL(hx711_right));
+    hx711_devices[0] = DEVICE_DT_GET(DT_NODELABEL(hx711_drain));
+    hx711_devices[1] = DEVICE_DT_GET(DT_NODELABEL(hx711_steam));
 
     for (int i = 0; i < HX711_COUNT; i++) {
         __ASSERT(hx711_devices[i] != NULL, "Failed to get HX711 device");
