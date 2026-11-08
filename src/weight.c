@@ -99,6 +99,7 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 
         // 2. Read the Sensor
         int32_t total_weight_cg = 0;
+        int32_t weights_cg[HX711_COUNT];
 		int ret = 0;
 		bool measurement_valid = true;
 
@@ -113,14 +114,16 @@ void weight_thread_entry(void *p1, void *p2, void *p3)
 				measurement_valid = false;
 				break;
 			}
-			total_weight_cg += weight_sensor_value_to_centi_grams(&weight);
+            weights_cg[i] = weight_sensor_value_to_centi_grams(&weight);
+            total_weight_cg += weights_cg[i];
 		}
 
 		if (measurement_valid) {
 
             int64_t now_ms = k_uptime_get();
             if ((now_ms - last_weight_log_ms) >= WEIGHT_DEBUG_LOG_INTERVAL_MS) {
-				LOG_DBG("Weight sample: %d.%02d g", total_weight_cg / 100, abs(total_weight_cg % 100));
+                LOG_INF("Weight samples: HX711 0: %d cg, HX711 1: %d cg, total: %d cg",
+                    weights_cg[0], weights_cg[1], total_weight_cg);
                 last_weight_log_ms = now_ms;
             }
 
