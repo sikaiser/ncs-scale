@@ -1,9 +1,26 @@
 / {
-	hx711 {
+	hx711_drain: hx711-drain {
 		compatible = "avia,hx711";
 		status = "okay";
-		label = "HX711";
-		dout-gpios = <&gpio0 20 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-		sck-gpios = <&gpio0 17 GPIO_ACTIVE_HIGH>;
+		dout-gpios = <&gpio0 17 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		sck-gpios = <&gpio0 20 GPIO_ACTIVE_HIGH>;
+	};
+
+	hx711_steam: hx711-steam {
+		compatible = "avia,hx711";
+		status = "okay";
+		dout-gpios = <&gpio0 22 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+		sck-gpios = <&gpio0 24 GPIO_ACTIVE_HIGH>;
 	};
 };
+
+&gpio0 { /* To enable vcc, P0.13 has to be set high */
+    status = "okay";
+
+    vcc_enable {
+        gpio-hog;
+        gpios = <13 GPIO_ACTIVE_HIGH>;
+        output-high;                   /* Forces the pin high on boot */
+    };
+};
+

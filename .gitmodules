@@ -1,0 +1,3 @@
+[submodule "modules/HX711"]
+	path = modules/HX711
+	url = https://github.com/Agalmic/HX711_zephyr_driver.git
